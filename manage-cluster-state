@@ -28,7 +28,7 @@ class ConfigurationFailure(Exception):
 
 def main():
 
-    logging.basicConfig(level=logging.DEBUG)
+    #logging.basicConfig(level=logging.DEBUG)
 
     etcd_peers_file = os.environ.get('ETCD_PEERS_FILE', '/etc/sysconfig/etcd-peers')
 
@@ -198,6 +198,37 @@ class AWSCloudProvider(CloudProvider):
 
         return peer_name_and_ips
 
+class AWSSpotCloudProvider(CloudProvider):
+    def __init__(self, *args, **kwargs):
+        super(AWSSpotCloudProvider, self).__init__(*args, **kwargs)
+        self.meta = requests.get('http://169.254.169.254/latest/dynamic/instance-identity/document').json()
+        self.region = self.meta['region']
+
+    def discover_spot_fleet_instances(self):
+        client = boto3.client('ec2', region_name=self.region)
+
+        spot_requests = client.describe_spot_fleet_requests()['SpotFleetRequestConfigs']
+        active_spot_ids = [req['SpotFleetRequestId'] for req in spot_requests if req['SpotFleetRequestState'] != 'cancelled']
+        
+        for spot_id in active_spot_ids:
+            active_instances = client.describe_spot_fleet_instances(SpotFleetRequestId=spot_id)['ActiveInstances']
+            active_instance_ids = [ i['InstanceId'] for i in active_instances]
+            if self.instance_id in active_instance_ids:
+                return active_instance_ids
+
+        raise ConfigurationFailure('Failed to get the spot fleet instances')
+
+    def get_peer_name_and_ips(self):
+        peer_name_and_ips = []
+        instance_ids = self.discover_spot_fleet_instances()
+
+        ec2_client = boto3.client('ec2', region_name=self.region)
+        for reservation in ec2_client.describe_instances(InstanceIds=instance_ids)['Reservations']:
+            for instance in reservation['Instances']:
+                for network_interface in instance['NetworkInterfaces']:
+                    peer_name_and_ips.append((instance['InstanceId'], network_interface['PrivateIpAddress']))
+
+        return peer_name_and_ips
 
 class GoogleCloudProvider(CloudProvider):
     def __init__(self, *args, **kwargs):
@@ -278,6 +309,7 @@ class OpenstackCloudProvider(CloudProvider):
 
 
 CLOUD_PROVIDERS = {
+    'aws_spot': AWSSpotCloudProvider,
     'aws': AWSCloudProvider,
     'google': GoogleCloudProvider,
     'openstack': OpenstackCloudProvider,
@@ -286,3 +318,4 @@ CLOUD_PROVIDERS = {
 
 if __name__ == '__main__':
     main()
+
