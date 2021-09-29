@@ -2,9 +2,9 @@ FROM python:3-alpine
 
 COPY requirements.txt /
 
-RUN apk add --no-cache gcc linux-headers musl-dev python-dev && \
+RUN apk add --no-cache gcc linux-headers musl-dev python3-dev && \
     pip install --no-cache -r /requirements.txt && \
-    apk del gcc linux-headers musl-dev python-dev
+    apk del gcc linux-headers musl-dev python3-dev
 
 COPY manage-cluster-state /
 
